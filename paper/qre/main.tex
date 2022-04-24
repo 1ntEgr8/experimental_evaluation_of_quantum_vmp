@@ -1,0 +1,221 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage[hyphens]{url}
+\usepackage[braket, qm]{qcircuit}
+\usepackage{cleveref}
+\usepackage{subcaption}
+\usepackage{algorithm}
+
+\crefname{section}{§}{§§}
+\crefname{figure}{Fig.}{Fig.}
+\crefname{algorithm}{Alg.}{Alg.}
+\crefname{table}{Table}{Table}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% Ensure letter paper
+\pdfpagewidth=8.5in
+\pdfpageheight=11in
+
+%%%%%%%%%%%---SETME-----%%%%%%%%%%%%%
+\newcommand{\iscasubmissionnumber}{1}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\pagenumbering{arabic}
+
+%%%%%%%%%%%---SETME-----%%%%%%%%%%%%%
+\title{An Implementation of the Quantum Verification of Matrix Products Algorithm}
+\author{\normalsize{ISCA 2022 Submission
+    \textbf{\#\iscasubmissionnumber} -- Confidential Draft -- Do NOT Distribute!!}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\maketitle
+\thispagestyle{plain}
+\pagestyle{plain}
+
+
+% TODO iterate on abstract
+
+%%%%%% -- PAPER CONTENT STARTS-- %%%%%%%%
+
+\begin{abstract}
+
+  We present a space-efficient implementation of the quantum verification of
+  matrix products (QVMP) algorithm and demonstrate its functionality by running
+  it on the Aer simulator with two simulation methods: statevector and matrix
+  product state (MPS). We report circuit metrics (gate count, qubit count,
+  circuit depth), transpilation time, simulation time, and a proof of Grover
+  oracle correctness.  Our study concludes that while QVMP can be simulated on
+  moderately sized inputs, it cannot scale to a degree where we can observe any
+  quantum advantage on current quantum hardware due to circuit depth and qubit
+  count constraints. Further, the choice of simulation method has a noticeable
+  impact on the size of the transpiled circuit which slows down development.
+
+\end{abstract}
+
+\section{Introduction}
+
+  Grover's algorithm depends on a user-provided oracle that acts as a decision
+  function over the input space. The oracle typically does not depend on quantum
+  effects and can be programmed using classical operators. However, to use such
+  an oracle in Grover's algorithm, we need to encode it as a quantum circuit.
+  Programming reversible oracles can be tricky. It is difficult to reason about
+  entanglement, non-trivial to debug, and cumbersome to formally verify
+  correctness using machine-checked proofs.
+
+  REVS \cite{amy2017verified} and Quipper \cite{green2013quipper} have presented
+  compilers that can convert oracles written in a high-level classical language
+  to reversible circuits using variants of Bennett's method.  To our knowledge,
+  however, their work does not adequately address the space of compiling
+  higher-level data structures like records, lists, and multi-dimensional
+  arrays. There are interesting design choices to be made which can have an
+  impact on the size and efficiency of the resulting circuit.
+
+  In this study we demonstrate one such design choice by presenting an
+  implementation of the Grover search based version of QVMP
+  \cite{ambainis2002quantummatrix}. This algorithm runs in $O(n^{\frac{7}{4}})$
+  time and improves upon the optimal classical bound provided by Freivalds
+  \cite{freivalds1979fast}. Our implementation makes use of Quantum Read-Only
+  Memory (QROM) \cite{babbush2018encoding} to efficiently encode the inputs,
+  resulting in a quadratic improvement in space-efficiency ($O(n + m)$ qubits).
+  
+\section{Implementation}
+
+The algorithm we implemented is summarized in \cref{alg:qvmp_grover}.
+\cref{fig:qvmp_oracle_4x4} shows an example circuit that performs one iteration
+of the Grover operator used in step 2.3. The sub-circuits used are QROM (denoted
+by $db$), out-of-place inner product (denoted by $dot$), and diffuser.
+
+\begin{algorithm}
+  \caption{Quantum VMP using Grover Search ~\cite{lanl2018quantum}}
+  \label{alg:qvmp_grover}
+  \textbf{Input: } $n \times n$ matrices $A, B, C$ \\
+  \textbf{Output: } 1 if $AB = C$ and 0 otherwise \\
+  \textbf{Procedure: }
+  \begin{enumerate}
+    \item Partition $B$ and $C$ into sub-matrices of size $n \times \sqrt{n}$
+    \item 
+      {
+        Perform amplitude amplification for $n^{\frac{1}{4}}$ iterations using this subroutine:
+        \begin{enumerate}
+          \item Pick a random vector $x$ of size $\sqrt{n}$
+          \item Classically compute $y = B_ix$ and $z = C_ix$
+          \item Using Grover search with $\sqrt{n}$ iterations, find a row of
+            index $j$ such that $(Ay \neq z)_j$
+        \end{enumerate}
+      }
+    \item XOR the sub-results
+  \end{enumerate}
+\end{algorithm}
+
+
+\section{Results}
+
+\input{../../results/tables/circuit_metrics_isca.tex}
+
+\subsection{Functionality}
+
+\begin{figure}
+  \centering
+  \begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=0.6\textwidth]{../../results/figures/qvmp_functionality_found_unknown.pdf}
+    \caption{\textbf{Success}: $8 \times 8$ matrix with $(Ay \neq z)_j$ for $j \in \{2, 5, 7\}$}
+    \label{fig:qvmp_functionality_success}
+  \end{subfigure}
+  \begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=0.6\textwidth]{../../results/figures/qvmp_functionality_pfound_unknown__1.pdf}
+    \caption{\textbf{Failure}: $16 \times 16$ matrix with $(Ay \neq z)_j$ for $j \in \{1, 4, 5\}$}
+    \label{fig:qvmp_functionality_failure}
+  \end{subfigure}
+  \caption{Histogram showing the probability distribution of measuring the
+  address qubits of the QVMP circuit}
+  \label{fig:qvmp_functionality}
+\end{figure}
+
+\cref{fig:qvmp_functionality_success} demonstrates that our implementation is
+able to correctly find the row indices where there is a mismatch.
+\cref{fig:qvmp_functionality_failure} demonstrates a failure case that happens
+when the number of Grover iterations prescribed by the algorithm is not a
+multiple of period, which we define to be the number of oscillations between the
+Grover-optimal number of iterations.
+
+\subsection{Circuit Metrics}
+
+We report circuit metrics (gate count, circuit depth, qubit count)
+\cref{table:circuit_metrics} measured when using the MPS and statevector methods
+for the Grover search portion of QVMP (step 2.3 in \cref{alg:qvmp_grover}. The
+metrics are reported on circuits that used the optimal number of Grover
+iterations. When using the statevector method we see a small decrease in the
+circuit depth. Using MPS, on the other hand, results in two to three orders of
+magnitude more gate count and circuit depth.
+
+\subsection{Transpilation and Simulation}
+
+\begin{figure}[h!]
+  \begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=0.6\textwidth]{../../results/figures/circuit_depth_v_tran_time_and_sim_time-MPS.pdf}
+    \caption{MPS}
+  \end{subfigure}
+  \begin{subfigure}{0.48\textwidth}
+    \centering
+    \includegraphics[width=0.6\textwidth]{../../results/figures/circuit_depth_v_tran_time_and_sim_time-statevector_cpu.pdf}
+    \caption{Statevector}
+  \end{subfigure}
+  \caption{Circuit depth vs Transpilation/Simulation time}
+  \label{fig:circuit_depth_of_trans_v_sim}
+\end{figure}
+
+\cref{fig:circuit_depth_of_trans_v_sim} showcases how transpilation time and
+simulation time change as the circuit depth increases.  MPS seems to be spending
+more time on transpilation while its simulation time remains mostly constant.
+Statevector spends more time during simulation with transpilation time growing
+at a slow rate.
+
+\begin{figure*}
+  \centering
+  \scalebox{1}{\input{../../results/figures/qvmp_oracle.tex}}
+  \caption{QVMP circuit for a $4 \times 4$ matrix $A$ performing one iteration}
+  \label{fig:qvmp_oracle_4x4}
+\end{figure*}
+
+\section{Conclusions}
+
+In this study we present an implementation of QVMP in Qiskit that uses $O(n+m)$
+qubits achieved by using QROM to encode inputs. We reported circuit metrics
+(gate count, depth, qubit count) as well as transpilation and simulation times.
+While QVMP can be simulated (and even run) on moderately-sized inputs, it
+cannot, with present hardware, scale to a degree where we can observe any
+quantum advantage. We demonstrate that the choice of simulation method has a
+noticeable impact on depth of the circuit, the effects of which trickle into
+transpilation and simulation time.
+
+\section*{Acknowledgements}
+
+This research was supported in part through research infrastructure and services
+provided by the Rogues Gallery testbed \cite{young:2019:rg-exp-insights} hosted
+by the Center for Research into Novel Computing Hierarchies (CRNCH) at Georgia
+Tech.
+
+
+%%%%%%% -- PAPER CONTENT ENDS -- %%%%%%%%
+
+
+%%%%%%%%% -- BIB STYLE AND FILE -- %%%%%%%%
+\bibliographystyle{IEEEtranS}
+\bibliography{refs}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+\end{document}
+
